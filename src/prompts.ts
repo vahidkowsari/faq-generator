@@ -82,6 +82,8 @@ Focus on these categories:
 
 Answer length guideline: {{wordingGuideline}}
 
+{{previousQuestions}}
+
 Return a JSON object with a "faqs" array containing exactly {{targetCount}} FAQ objects:
 {
   "faqs": [

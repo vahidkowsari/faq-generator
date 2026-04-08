@@ -97,9 +97,14 @@ export async function generateBusinessFaqs(
     businessInfo: string,
     targetCount: number,
     categories: string[],
-    wordingGuideline: string
+    wordingGuideline: string,
+    previousQuestions: string[] = []
 ): Promise<FaqItem[]> {
     console.log(`Generating ${targetCount} business-specific FAQs for ${organizationName} (${businessType})`)
+
+    const previousQuestionsBlock = previousQuestions.length > 0
+        ? `IMPORTANT: Do NOT generate any of these already-existing questions or close variations of them:\n${previousQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}`
+        : ''
 
     const userPrompt = BUSINESS_FAQ_USER_PROMPT
         .replace(/\{\{organizationName\}\}/g, organizationName)
@@ -108,6 +113,7 @@ export async function generateBusinessFaqs(
         .replace('{{businessInfo}}', businessInfo)
         .replace('{{categories}}', categories.join(', '))
         .replace('{{wordingGuideline}}', wordingGuideline)
+        .replace('{{previousQuestions}}', previousQuestionsBlock)
 
     const systemPrompt = BUSINESS_FAQ_SYSTEM_PROMPT
         .replace('{{wordingGuideline}}', wordingGuideline)

@@ -4,6 +4,7 @@
  * FAQ Generator CLI
  * 
  * Generates customized FAQs for any business using OpenAI.
+ * Large counts are split into batches of 80 to avoid token limits.
  * 
  * Usage:
  *   deno task generate --name "Business Name" --url "https://website.com"
@@ -15,11 +16,22 @@
  *   --count     Number of FAQs to generate (default: 75)
  *   --wording   Answer length: short | medium | long (default: short)
  *   --verify    Verify FAQs against source (default: false)
- *   --output    Output file path (default: <name>-faqs.csv)
+ *   --output    Output file path without extension (default: <name>-faqs)
  *   --format    Output format: csv | json | both (default: csv)
  */
 
-import { generateFaqs, validateFaqRequest, faqsToCSV } from './src/index.ts'
+import {
+  researchBusiness,
+  generateCategories,
+  generateBusinessFaqs,
+  deduplicateFaqs,
+  validateFaqRequest,
+  faqsToCSV,
+} from './src/index.ts'
+import { WORDING_GUIDELINES } from './src/config.ts'
+import type { FaqItem, WordingLevel } from './src/types.ts'
+
+const BATCH_SIZE = 80
 
 // ─── Parse CLI args ────────────────────────────────────────────────────────────
 
@@ -46,7 +58,7 @@ Options:
   --name      Business name (required)
   --url       Business website URL (required)
   --type      Business type, e.g. "Dental Office", "Law Firm" (default: "business")
-  --count     Number of FAQs to generate, 1-200 (default: 75)
+  --count     Number of FAQs to generate (default: 75)
   --wording   Answer length: short | medium | long (default: short)
   --verify    Verify FAQs against source research: true | false (default: false)
   --output    Output file path without extension (default: <slugified-name>-faqs)
@@ -73,11 +85,10 @@ async function main() {
   const url = args.url
   const businessType = args.type || 'business'
   const count = parseInt(args.count || '75', 10)
-  const wording = (args.wording || 'short') as 'short' | 'medium' | 'long'
+  const wording = (args.wording || 'short') as WordingLevel
   const verify = args.verify === 'true'
   const format = (args.format || 'csv') as 'csv' | 'json' | 'both'
 
-  // Validate required args
   if (!name || !url) {
     console.error('Error: --name and --url are required\n')
     printUsage()
@@ -96,13 +107,12 @@ async function main() {
     Deno.exit(1)
   }
 
-  // Build output filename
   const slug = args.output || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-faqs'
   const outputDir = 'output'
   await Deno.mkdir(outputDir, { recursive: true })
   const outputPath = `${outputDir}/${slug}`
 
-  // ─── Run ──────────────────────────────────────────────────────────────────────
+  const wordingGuideline = WORDING_GUIDELINES[wording]
 
   console.log('\n═'.repeat(60))
   console.log('  FAQ Generator')
@@ -120,36 +130,65 @@ async function main() {
   const startTime = Date.now()
 
   try {
-    const result = await generateFaqs(apiKey, name, url, [], {
-      businessType,
-      totalCount: count,
-      businessSpecificRatio: 1.0,   // 100% business-specific (no generic templates needed)
-      verify,
-      wordingLevel: wording,
-      deduplicate: true
-    })
+    // Step 1: Research the business once
+    console.log('Step 1/3: Researching business...')
+    const research = await researchBusiness(apiKey, name, url, businessType)
+
+    // Step 2: Generate categories once
+    console.log('Step 2/3: Generating categories...')
+    const categories = await generateCategories(apiKey, businessType, research.summary)
+
+    // Step 3: Generate FAQs in batches until target is reached
+    console.log(`Step 3/3: Generating ${count} FAQs in batches of ${BATCH_SIZE}...`)
+    const allFaqs: FaqItem[] = []
+    let batchNum = 0
+    let consecutiveEmptyBatches = 0
+
+    while (allFaqs.length < count) {
+      batchNum++
+      const needed = count - allFaqs.length
+      const batchSize = Math.min(needed + Math.floor(needed * 0.2), BATCH_SIZE) // request 20% extra to account for dedup loss
+      const previousQuestions = allFaqs.map(f => f.question)
+      console.log(`  Batch ${batchNum}: generating ${batchSize} FAQs (${allFaqs.length}/${count} collected, avoiding ${previousQuestions.length} existing questions)...`)
+
+      const batch = await generateBusinessFaqs(apiKey, name, businessType, research.summary, batchSize, categories, wordingGuideline, previousQuestions)
+
+      // Deduplicate immediately against everything already collected
+      const combined = deduplicateFaqs([...allFaqs, ...batch])
+      const newUnique = combined.slice(allFaqs.length)
+      console.log(`    → ${batch.length} generated, ${newUnique.length} unique after dedup`)
+
+      if (newUnique.length === 0) {
+        consecutiveEmptyBatches++
+        if (consecutiveEmptyBatches >= 2) {
+          console.log(`  ⚠️  No new unique FAQs after ${consecutiveEmptyBatches} batches — topic exhausted at ${allFaqs.length} FAQs`)
+          break
+        }
+      } else {
+        consecutiveEmptyBatches = 0
+      }
+
+      allFaqs.push(...newUnique)
+    }
+
+    const finalFaqs = allFaqs.slice(0, count)
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+    console.log(`\n✅ Generated ${finalFaqs.length} FAQs in ${elapsed}s`)
 
-    console.log(`\n✅ Generated ${result.totalCount} FAQs in ${elapsed}s`)
-    if (verify) {
-      console.log(`   Verified: ${result.verifiedCount}/${result.totalCount}`)
-    }
-
-    // ─── Category summary ───────────────────────────────────────────────────────
+    // Category summary
     const byCategory: Record<string, number> = {}
-    for (const faq of result.faqs) {
+    for (const faq of finalFaqs) {
       byCategory[faq.category] = (byCategory[faq.category] || 0) + 1
     }
-
     console.log('\n📊 By category:')
     for (const [cat, cnt] of Object.entries(byCategory).sort((a, b) => b[1] - a[1])) {
       console.log(`   ${cat}: ${cnt}`)
     }
 
-    // ─── Write output ───────────────────────────────────────────────────────────
+    // Write output
     if (format === 'csv' || format === 'both') {
-      const csv = faqsToCSV(result.faqs, name)
+      const csv = faqsToCSV(finalFaqs, name)
       const csvPath = `${outputPath}.csv`
       await Deno.writeTextFile(csvPath, csv)
       console.log(`\n📄 CSV saved to: ${csvPath}`)
@@ -157,7 +196,7 @@ async function main() {
 
     if (format === 'json' || format === 'both') {
       const jsonPath = `${outputPath}.json`
-      await Deno.writeTextFile(jsonPath, JSON.stringify(result, null, 2))
+      await Deno.writeTextFile(jsonPath, JSON.stringify({ organization_name: name, faqs: finalFaqs, total_count: finalFaqs.length }, null, 2))
       console.log(`📄 JSON saved to: ${jsonPath}`)
     }
 
