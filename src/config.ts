@@ -41,7 +41,7 @@ export const OPENAI_CONFIG = {
         RESEARCH: 4000,
         BUSINESS_FAQ: 8000,
         CUSTOMIZE: 8000,
-        VERIFY: 2000,
+        VERIFY: 4000,
         CATEGORIES: 500
     }
 } as const

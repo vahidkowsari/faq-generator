@@ -15,7 +15,7 @@
  *   --type      Business type (default: "business")
  *   --count     Number of FAQs to generate (default: 75)
  *   --wording   Answer length: short | medium | long (default: short)
- *   --verify    Verify FAQs against source (default: false)
+ *   --verify    Verify FAQs against source (default: true)
  *   --output    Output file path without extension (default: <name>-faqs)
  *   --format    Output format: csv | json | both (default: csv)
  */
@@ -24,6 +24,7 @@ import {
   researchBusiness,
   generateCategories,
   generateBusinessFaqs,
+  verifyFaqs,
   deduplicateFaqs,
   validateFaqRequest,
   faqsToCSV,
@@ -60,7 +61,7 @@ Options:
   --type      Business type, e.g. "Dental Office", "Law Firm" (default: "business")
   --count     Number of FAQs to generate (default: 75)
   --wording   Answer length: short | medium | long (default: short)
-  --verify    Verify FAQs against source research: true | false (default: false)
+  --verify    Verify FAQs against source research: true | false (default: true)
   --output    Output file path without extension (default: <slugified-name>-faqs)
   --format    Output format: csv | json | both (default: csv)
 
@@ -86,7 +87,7 @@ async function main() {
   const businessType = args.type || 'business'
   const count = parseInt(args.count || '75', 10)
   const wording = (args.wording || 'short') as WordingLevel
-  const verify = args.verify === 'true'
+  const verify = args.verify !== 'false'
   const format = (args.format || 'csv') as 'csv' | 'json' | 'both'
 
   if (!name || !url) {
@@ -171,10 +172,17 @@ async function main() {
       allFaqs.push(...newUnique)
     }
 
-    const finalFaqs = allFaqs.slice(0, count)
+    let finalFaqs = allFaqs.slice(0, count)
+
+    // Step 4: Optionally verify FAQs against the research
+    if (verify) {
+      console.log('Step 4/4: Verifying FAQs against research...')
+      finalFaqs = await verifyFaqs(apiKey, name, research.summary, finalFaqs)
+    }
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
-    console.log(`\n✅ Generated ${finalFaqs.length} FAQs in ${elapsed}s`)
+    const verifiedCount = finalFaqs.filter(f => f.verified).length
+    console.log(`\n✅ Generated ${finalFaqs.length} FAQs in ${elapsed}s${verify ? ` (${verifiedCount} verified)` : ''}`)
 
     // Category summary
     const byCategory: Record<string, number> = {}

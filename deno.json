@@ -1,5 +1,6 @@
 {
   "tasks": {
-    "generate": "deno run --allow-net --allow-env --allow-write cli.ts"
+    "generate": "deno run --allow-net --allow-env --allow-write cli.ts",
+    "pdf": "deno run --allow-read --allow-write csv-to-pdf.ts"
   }
 }

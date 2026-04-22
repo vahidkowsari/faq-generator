@@ -195,6 +195,8 @@ export async function customizeGenericFaqs(
 /**
  * Verifies FAQs against the original business research
  */
+const VERIFY_BATCH_SIZE = 40
+
 export async function verifyFaqs(
     apiKey: string,
     organizationName: string,
@@ -211,43 +213,57 @@ export async function verifyFaqs(
         return [...genericFaqs]
     }
 
-    try {
-        const userPrompt = VERIFY_FAQ_USER_PROMPT
-            .replace('{{organizationName}}', organizationName)
-            .replace('{{businessInfo}}', businessInfo)
-            .replace('{{faqs}}', JSON.stringify(
-                businessFaqs.map((f, i) => ({ id: i, question: f.question, answer: f.answer })),
-                null,
-                2
-            ))
+    // Process in batches to avoid token limits
+    const verifiedBusinessFaqs: FaqItem[] = []
+    const batches = Math.ceil(businessFaqs.length / VERIFY_BATCH_SIZE)
 
-        const content = await callOpenAIChat(
-            apiKey,
-            VERIFY_FAQ_SYSTEM_PROMPT,
-            userPrompt,
-            {
-                temperature: OPENAI_CONFIG.TEMPERATURE.VERIFY,
-                maxTokens: OPENAI_CONFIG.MAX_TOKENS.VERIFY,
-                responseFormat: 'json_object'
-            }
-        )
+    for (let b = 0; b < batches; b++) {
+        const batchStart = b * VERIFY_BATCH_SIZE
+        const batch = businessFaqs.slice(batchStart, batchStart + VERIFY_BATCH_SIZE)
+        console.log(`  Verifying batch ${b + 1}/${batches} (${batch.length} FAQs)...`)
 
-        const parsed = JSON.parse(content)
-        const results = parsed.results || []
+        try {
+            const userPrompt = VERIFY_FAQ_USER_PROMPT
+                .replace('{{organizationName}}', organizationName)
+                .replace('{{businessInfo}}', businessInfo)
+                .replace('{{faqs}}', JSON.stringify(
+                    batch.map((f, i) => ({ id: i, question: f.question, answer: f.answer })),
+                    null,
+                    2
+                ))
 
-        const verifiedBusinessFaqs = businessFaqs.map((faq, index) => {
-            const verification = results.find((r: { id: number; verified: boolean }) => r.id === index)
-            return { ...faq, verified: verification?.verified ?? false }
-        })
+            const content = await callOpenAIChat(
+                apiKey,
+                VERIFY_FAQ_SYSTEM_PROMPT,
+                userPrompt,
+                {
+                    temperature: OPENAI_CONFIG.TEMPERATURE.VERIFY,
+                    maxTokens: OPENAI_CONFIG.MAX_TOKENS.VERIFY,
+                    responseFormat: 'json_object'
+                }
+            )
 
-        const verifiedCount = verifiedBusinessFaqs.filter(f => f.verified).length
-        console.log(`Verified ${verifiedCount}/${businessFaqs.length} business-specific FAQs`)
+            const parsed = JSON.parse(content)
+            const results = parsed.results || []
 
-        return [...verifiedBusinessFaqs, ...genericFaqs]
-    } catch (error) {
-        console.error('Error verifying FAQs, marking all as unverified:', error)
-        return [...businessFaqs.map(f => ({ ...f, verified: false })), ...genericFaqs]
+            const verifiedBatch = batch.map((faq, index) => {
+                const verification = results.find((r: { id: number; verified: boolean }) => r.id === index)
+                return { ...faq, verified: verification?.verified ?? false }
+            })
+
+            const batchVerifiedCount = verifiedBatch.filter(f => f.verified).length
+            console.log(`    → ${batchVerifiedCount}/${batch.length} verified in this batch`)
+            verifiedBusinessFaqs.push(...verifiedBatch)
+        } catch (error) {
+            console.error(`  Error verifying batch ${b + 1}, marking as unverified:`, error)
+            verifiedBusinessFaqs.push(...batch.map(f => ({ ...f, verified: false })))
+        }
     }
+
+    const totalVerified = verifiedBusinessFaqs.filter(f => f.verified).length
+    console.log(`Verified ${totalVerified}/${businessFaqs.length} business-specific FAQs`)
+
+    return [...verifiedBusinessFaqs, ...genericFaqs]
 }
 
 /**
