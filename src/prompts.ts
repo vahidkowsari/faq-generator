@@ -136,6 +136,53 @@ Return a JSON object with a "faqs" array containing exactly {{faqCount}} customi
 You MUST return exactly {{faqCount}} FAQs in the faqs array.`
 
 /**
+ * Prompt for summarizing a page into about / organization / scheduling sections
+ */
+export const PAGE_SUMMARY_PROMPT = `Research the website {{url}}{{contextBlock}} by thoroughly crawling MULTIPLE pages. Do NOT rely on the homepage alone.
+
+REQUIRED: Visit each of these page types if they exist on the site (use web search to find them):
+- Homepage
+- About / About Us
+- Services / Treatments / What We Offer (visit individual service detail pages)
+- Team / Staff / Doctors / Providers
+- Locations / Offices
+- Contact / Contact Us
+- Hours / Schedule
+- Appointments / Book Online / New Patients / Patient Resources
+- FAQ page if one exists
+
+Issue multiple web_search and page-fetch calls as needed — a single homepage scrape is INSUFFICIENT. Extract specific details (names, addresses, phone numbers, hours, credentials) directly from these subpages.
+
+Produce a structured summary with three sections:
+
+1. **about**: What the organization does, its mission/values, services or products offered, what makes it distinctive, target customers, years in business if mentioned.
+
+2. **organization**: Legal/brand name, location(s) with full addresses, phone number(s) per location, email(s), key staff/team members with titles, credentials/affiliations, social links if visible.
+
+3. **scheduling**: Hours of operation per location, appointment/booking process, online booking links if available, new-customer onboarding steps, cancellation/no-show policy if stated, emergency or after-hours availability.
+
+Return ONLY a JSON object with this exact shape:
+{
+  "about": "string — multi-paragraph prose summary",
+  "organization": {
+    "name": "string",
+    "locations": [{ "address": "string", "phone": "string", "email": "string" }],
+    "team": [{ "name": "string", "title": "string", "credentials": "string" }],
+    "links": { "website": "string", "booking": "string", "social": ["string"] }
+  },
+  "scheduling": {
+    "hours": "string — hours per location",
+    "booking_process": "string",
+    "online_booking_url": "string",
+    "new_customer_steps": "string",
+    "policies": "string",
+    "emergency": "string"
+  }
+}
+
+Use empty strings or empty arrays for fields you cannot find. Do not invent information.`
+
+/**
  * System prompt for verifying FAQs
  */
 export const VERIFY_FAQ_SYSTEM_PROMPT = `You are a fact-checker verifying FAQ answers against source information.

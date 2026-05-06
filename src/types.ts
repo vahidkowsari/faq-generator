@@ -57,6 +57,27 @@ export interface FaqGenerationResult {
 }
 
 /**
+ * Page summary result — about / organization / scheduling
+ */
+export interface PageSummary {
+    about: string
+    organization: {
+        name: string
+        locations: Array<{ address: string; phone: string; email: string }>
+        team: Array<{ name: string; title: string; credentials: string }>
+        links: { website: string; booking: string; social: string[] }
+    }
+    scheduling: {
+        hours: string
+        booking_process: string
+        online_booking_url: string
+        new_customer_steps: string
+        policies: string
+        emergency: string
+    }
+}
+
+/**
  * OpenAI API configuration
  */
 export interface OpenAIConfig {

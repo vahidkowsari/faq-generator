@@ -25,6 +25,7 @@ export type {
     FaqGenerationOptions,
     FaqGenerationResult,
     OpenAIConfig,
+    PageSummary,
     WordingLevel
 } from './types.ts'
 
@@ -68,6 +69,7 @@ export {
 export {
     generateCategories,
     researchBusiness,
+    summarizePage,
     generateBusinessFaqs,
     customizeGenericFaqs,
     verifyFaqs,

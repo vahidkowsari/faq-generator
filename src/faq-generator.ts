@@ -3,12 +3,13 @@
  * Provides high-level functions for generating dental practice FAQs
  */
 
-import type { FaqItem, BusinessResearch, FaqGenerationOptions, FaqGenerationResult } from './types.ts'
+import type { FaqItem, BusinessResearch, FaqGenerationOptions, FaqGenerationResult, PageSummary } from './types.ts'
 import { FAQ_DEFAULTS, OPENAI_CONFIG, WORDING_GUIDELINES } from './config.ts'
 import { parseOpenAIFaqResponse, deduplicateFaqs } from './utils.ts'
 import { callOpenAIResponses, callOpenAIChat } from './openai.ts'
 import {
     CATEGORIES_PROMPT,
+    PAGE_SUMMARY_PROMPT,
     RESEARCH_PROMPT,
     BUSINESS_FAQ_SYSTEM_PROMPT,
     BUSINESS_FAQ_USER_PROMPT,
@@ -60,6 +61,58 @@ export async function generateCategories(
     } catch (error) {
         console.error('Error generating categories:', error)
         return []
+    }
+}
+
+/**
+ * Summarizes a webpage into about / organization / scheduling sections.
+ * Uses the OpenAI Responses API with web search to crawl the URL.
+ */
+export async function summarizePage(
+    apiKey: string,
+    url: string,
+    organizationName?: string
+): Promise<PageSummary> {
+    console.log(`Summarizing page: ${url}${organizationName ? ` (${organizationName})` : ''}`)
+
+    const contextBlock = organizationName ? ` for the organization "${organizationName}"` : ''
+    const prompt = PAGE_SUMMARY_PROMPT
+        .replace('{{url}}', url)
+        .replace('{{contextBlock}}', contextBlock)
+
+    const content = await callOpenAIResponses(apiKey, prompt)
+
+    // The Responses API may wrap the JSON in prose or code fences — extract it.
+    const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/) || [null, content]
+    const jsonText = (jsonMatch[1] || content).trim()
+    const firstBrace = jsonText.indexOf('{')
+    const lastBrace = jsonText.lastIndexOf('}')
+    if (firstBrace === -1 || lastBrace === -1) {
+        throw new Error('summarizePage: no JSON object found in model response')
+    }
+
+    const parsed = JSON.parse(jsonText.slice(firstBrace, lastBrace + 1))
+
+    return {
+        about: parsed.about || '',
+        organization: {
+            name: parsed.organization?.name || '',
+            locations: parsed.organization?.locations || [],
+            team: parsed.organization?.team || [],
+            links: {
+                website: parsed.organization?.links?.website || url,
+                booking: parsed.organization?.links?.booking || '',
+                social: parsed.organization?.links?.social || []
+            }
+        },
+        scheduling: {
+            hours: parsed.scheduling?.hours || '',
+            booking_process: parsed.scheduling?.booking_process || '',
+            online_booking_url: parsed.scheduling?.online_booking_url || '',
+            new_customer_steps: parsed.scheduling?.new_customer_steps || '',
+            policies: parsed.scheduling?.policies || '',
+            emergency: parsed.scheduling?.emergency || ''
+        }
     }
 }
 
